@@ -6,36 +6,54 @@ Sub generate_graph()
     
     Dim wkbk As Workbook:                           Set wkbk = ThisWorkbook
     Dim sht As Worksheet:                           Set sht = wkbk.Worksheets("Wall_Loss_Vs_Time_Graph")
+    Dim clear_range As Range:                       Set clear_range = sht.Range("U2:X1000")
+    Dim insert_cell As Range:                       Set insert_cell = sht.Range("U2")
+    Dim acr_bands_array As Range:                   Set acr_bands_array = sht.Range(sht.Range("C7").Value)
+    Dim last_inspection_date As Date:               last_inspection_date = sht.Range("C8").Value
+    Dim last_inspection_date_wall_loss As Double:   last_inspection_date_wall_loss = sht.Range("C9").Value
+    Dim nominal_wall_thickness As Double:           nominal_wall_thickness = sht.Range("C10").Value
+    Dim minimum_allowable_wall_thickness As Double: minimum_allowable_wall_thickness = sht.Range("C15").Value
+    Dim current_acr As Double:                      current_acr = sht.Range("C12").Value
+    Dim actual_cr As Double:                        actual_cr = sht.Range("C13").Value
+    Dim current_rl As Double:                       current_rl = sht.Range("C11").Value
+    Dim current_end_of_life As Date:                current_end_of_life = sht.Range("C16").Value
+    Dim recommended_rl As Double
+    Dim recommended_end_of_life As Date
+    Dim return_value As Variant
     
-    Dim last_inspection_date As Date:               last_inspection_date = sht.Range("I5").Value
-    Dim last_inspection_date_wall_loss As Double:   last_inspection_date_wall_loss = sht.Range("I6").Value
-    Dim acr_bands_array As Range:                   Set acr_bands_array = sht.Range(sht.Range("I7").Value)
-    Dim nominal_wall_thickness As Double:           nominal_wall_thickness = sht.Range("I8").Value
+    return_value = calculate_acr_bands_data("database", last_inspection_date, last_inspection_date_wall_loss, _
+    acr_bands_array, nominal_wall_thickness, minimum_allowable_wall_thickness, current_acr, actual_cr, current_rl, current_end_of_life)
     
-    Call calculate_acr_bands_data(last_inspection_date, last_inspection_date_wall_loss, acr_bands_array, nominal_wall_thickness)
+    recommended_rl = calculate_acr_bands_data("recommended_rl", last_inspection_date, last_inspection_date_wall_loss, _
+    acr_bands_array, nominal_wall_thickness, minimum_allowable_wall_thickness, current_acr, actual_cr, current_rl, current_end_of_life)
     
-    Call clear_graph_data
-    
-    Call output_graph_data
-    
-    Call configure_graph
+    recommended_end_of_life = DateValue(Format(DateAdd("d", recommended_rl * 365, Now()), "Short Date"))
+    Call output_graph_data(sht, clear_range, insert_cell, return_value)
+    Call configure_graph(sht, CLng(last_inspection_date), IIf(CLng(recommended_end_of_life) > CLng(current_end_of_life), CLng(recommended_end_of_life) + 100, CLng(current_end_of_life) + 100))
     
 End Sub
 
-Function calculate_acr_bands_data(last_inspection_date As Date, last_inspection_date_wall_loss As Double, _
-    acr_array As Range, nominal_wall_thickness As Double, return_parameter As String) As Variant
+'Description: Calculate database of wall loss vs time information so relevant parameters can be returned
+Function calculate_acr_bands_data(return_parameter As String, last_inspection_date As Date, last_inspection_date_wall_loss As Double, _
+    passed_acr_bands_array As Range, nominal_wall_thickness As Double, _
+    minimum_allowable_wall_thickness As Double, current_acr As Double, actual_cr As Double, current_rl As Double, current_end_of_life As Date) As Variant
     
-    Dim n As Integer: n = 0
-    Dim i As Integer: i = 0
-    Dim acr_bands_array As Range: Set acr_bands_array = acr_array
-    Dim graph_coordinates() As Class1
+    'Create copy of data range so nominal wall thickness value is not overriden
+    Dim acr_bands_array As Range:                   Set acr_bands_array = passed_acr_bands_array
+    Dim n As Integer:                               n = 0
+    Dim acr_bands_array_size As Integer:            acr_bands_array_size = acr_bands_array.Rows.Count
+    Dim return_data_array() As BAND_ARRAY_CLASS
     Dim current_band_position As Integer
+    Dim recommended_acr As Double
+    Dim recommended_rl As Double
+    Dim forecast_wall_loss As Double
+    Dim recommended_end_of_life As Date
     
-    'Update band array with nominal wall thickness of current cml
-    acr_bands_array(acr_bands_array.Rows.Count, 1) = nominal_wall_thickness
+    'Update band array with fail FFS wall thickness of current cml
+    acr_bands_array(acr_bands_array.Rows.Count, 1) = nominal_wall_thickness - minimum_allowable_wall_thickness
     
-    'Determine current band
-    For n = 1 To acr_bands_array.Rows.Count - 1
+    'Determine current band that the last inspection date wall loss falls into
+    For n = 1 To acr_bands_array_size - 1
         
         If last_inspection_date_wall_loss < acr_bands_array(n + 1, 1) Then
         
@@ -46,49 +64,41 @@ Function calculate_acr_bands_data(last_inspection_date As Date, last_inspection_
     
     Next n
     
-    i = i + 1
-    graph_coordinates = push_to_bands_array(graph_coordinates, last_inspection_date_wall_loss, Format(last_inspection_date, "Short Date"), acr_bands_array(n, 2))
+    'Push first row to array (last inspection date details)
+    return_data_array = push_to_array(return_data_array, "Todays Date Vertical Line", Format(last_inspection_date, "Short Date"), last_inspection_date_wall_loss, acr_bands_array(current_band_position, 2))
     
-    'For n = 1 To i
+    'Push all corrosion rate band data
+    If n <> 0 Then 'If a hole out is not detected
     
-        'Debug.Print "wall_loss: " & graph_coordinates(i).wall_loss
-        'Debug.Print "date_value: " & graph_coordinates(i).date_value
-        'Debug.Print "acr: " & graph_coordinates(i).acr
-    
-    'Next n
-    
-    'Plot all corrosion rate band points
-    'Still remaining wall thickness in current CML
-    If n <> 0 Then
-    
-        For n = current_band_position To acr_bands_array.Rows.Count - 1
+        For n = current_band_position To acr_bands_array_size - 1
             
-            i = i + 1
-            
-            'Debug.Print graph_coordinates(i - 1).date_value
-            'Debug.Print acr_bands_array(n + 1, 1)
-            
-            graph_coordinates = push_to_bands_array(graph_coordinates, _
+            return_data_array = push_to_array(return_data_array, _
+                "Corrosion Rate Bands Lines", _
+                Format(DateAdd("d", (acr_bands_array(n + 1, 1) - return_data_array(UBound(return_data_array)).wall_loss) / acr_bands_array(n, 2) * 365, return_data_array(UBound(return_data_array)).date_value), "Short Date"), _
                 acr_bands_array(n + 1, 1), _
-                Format(DateAdd("d", (acr_bands_array(n + 1, 1) - graph_coordinates(i - 1).wall_loss) / acr_bands_array(n, 2) * 365, graph_coordinates(i - 1).date_value), "Short Date"), _
                 acr_bands_array(n, 2))
             
         Next n
     
     End If
     
-    'Plot point for current wall loss
-    For n = 1 To i - 1
+    'Push data for current wall loss as of today
+    For n = 1 To UBound(return_data_array) - 1
     
-        If Now() < graph_coordinates(n + 1).date_value Then
-        
-            i = i + 1
-            'Debug.Print DateDiff("yyyy", graph_coordinates(n).date_value, Now())
+        If Now() < return_data_array(n + 1).date_value Then
             
-            graph_coordinates = push_to_bands_array(graph_coordinates, _
-                graph_coordinates(n).acr * DateDiff("d", graph_coordinates(n).date_value, Now()) / 365 + graph_coordinates(n).wall_loss, _
+            return_data_array = push_to_array(return_data_array, _
+                "Corrosion Rate Bands Lines", _
                 Format(Now(), "Short Date"), _
-                0)
+                return_data_array(n).acr * DateDiff("d", return_data_array(n).date_value, Now()) / 365 + return_data_array(n).wall_loss, _
+                return_data_array(n).acr)
+                
+                Dim rsize As Integer
+                rsize = UBound(return_data_array)
+                Debug.Print return_data_array(rsize).graph_name
+                Debug.Print return_data_array(rsize).date_value
+                Debug.Print return_data_array(rsize).wall_loss
+                Debug.Print return_data_array(rsize).acr
             
             Exit For
         
@@ -96,156 +106,121 @@ Function calculate_acr_bands_data(last_inspection_date As Date, last_inspection_
     
     Next n
     
+    recommended_acr = (return_data_array(UBound(return_data_array) - 1).wall_loss - return_data_array(UBound(return_data_array)).wall_loss) _
+                        / (return_data_array(UBound(return_data_array) - 1).date_value - return_data_array(UBound(return_data_array)).date_value)
+    forecast_wall_loss = return_data_array(UBound(return_data_array)).wall_loss
+    recommended_end_of_life = return_data_array(UBound(return_data_array) - 1).date_value
+    recommended_rl = DateDiff("d", return_data_array(UBound(return_data_array) - 1).date_value, Now()) / 365
+    
+    'Debug.Print recommended_rl
+    
+    'Add additional graph data for reference
+    return_data_array = push_to_array(return_data_array, "Todays Date Vertical Line", DateValue(Format(Now(), "Short Date")), 0, 0)
+    return_data_array = push_to_array(return_data_array, "Todays Date Vertical Line", DateValue(Format(Now(), "Short Date")), nominal_wall_thickness, 0)
+    
+    return_data_array = push_to_array(return_data_array, "Recommended RL Vertical Line", DateValue(Format(recommended_end_of_life, "Short Date")), 0, 0)
+    return_data_array = push_to_array(return_data_array, "Recommended RL Vertical Line", DateValue(Format(recommended_end_of_life, "Short Date")), nominal_wall_thickness, 0)
+    
+    return_data_array = push_to_array(return_data_array, "Recommended ACR Line", DateValue(Format(return_data_array(UBound(return_data_array)).date_value, "Short Date")), return_data_array(UBound(return_data_array)).wall_loss, recommended_acr)
+    return_data_array = push_to_array(return_data_array, "Recommended ACR Line", DateValue(Format(recommended_end_of_life, "Short Date")), nominal_wall_thickness, 0)
+    
+    return_data_array = push_to_array(return_data_array, "Current RL Vertical Line", current_end_of_life, 0, 0)
+    return_data_array = push_to_array(return_data_array, "Current RL Vertical Line", current_end_of_life, nominal_wall_thickness, 0)
+    
+    return_data_array = push_to_array(return_data_array, "Current ACR Line", DateValue(Format(last_inspection_date, "Short Date")), last_inspection_date_wall_loss, current_acr)
+    return_data_array = push_to_array(return_data_array, "Current ACR Line", DateValue(Format(current_end_of_life, "Short Date")), nominal_wall_thickness, current_acr)
+      
+    return_data_array = push_to_array(return_data_array, "Actual CR Line", DateValue(Format(last_inspection_date, "Short Date")), last_inspection_date_wall_loss, actual_cr)
+    return_data_array = push_to_array(return_data_array, "Actual CR Line", DateAdd("d", actual_cr * 365, last_inspection_date), nominal_wall_thickness, 0)
+    
+    return_data_array = push_to_array(return_data_array, "Actual CR RL Line", DateAdd("d", actual_cr * 365, last_inspection_date), 0, 0)
+    return_data_array = push_to_array(return_data_array, "Actual CR RL Line", DateAdd("d", actual_cr * 365, last_inspection_date), nominal_wall_thickness, 0)
+    
+    return_data_array = push_to_array(return_data_array, "Fail FFS Line", DateValue(Format(last_inspection_date, "Short Date")), nominal_wall_thickness - minimum_allowable_wall_thickness, 0)
+    return_data_array = push_to_array(return_data_array, "Fail FFS Line", IIf(recommended_end_of_life > DateAdd("d", current_acr * 365, last_inspection_date), recommended_end_of_life, DateAdd("d", current_acr * 365, last_inspection_date)), nominal_wall_thickness - minimum_allowable_wall_thickness, 0)
+    
+    return_data_array = push_to_array(return_data_array, "Nominal Wall Thickness Line", last_inspection_date, nominal_wall_thickness, 0)
+    return_data_array = push_to_array(return_data_array, "Nominal Wall Thickness Line", IIf(recommended_end_of_life > current_end_of_life, recommended_end_of_life, current_end_of_life), nominal_wall_thickness, 0)
+    
     'Return requested parameter to user
     If return_parameter = "database" Then
     
-        calculate_acr_bands_data = graph_coordinates
+        calculate_acr_bands_data = return_data_array
     
     ElseIf return_parameter = "recommended_acr" Then
     
-        calculate_acr_bands_data = graph_coordinates
+        calculate_acr_bands_data = recommended_acr
         
     ElseIf return_parameter = "forecast_wall_loss" Then
         
-        calculate_acr_bands_data = graph_coordinates
+        calculate_acr_bands_data = forecast_wall_loss
         
     ElseIf return_parameter = "recommended_rl" Then
     
-        calculate_acr_bands_data = graph_coordinates
+        calculate_acr_bands_data = recommended_rl
     
     Else
     
         calculate_acr_bands_data = Null
     
-    End
+    End If
     
 End Function
 
-'Pass array and values to push
-Function push_to_bands_array(bands_array As Variant, wall_loss As Double, date_value As Date, acr As Double) As Variant
+'Description: Pass array and values to push
+Function push_to_array(bands_array As Variant, graph_name As String, date_value As Date, wall_loss As Double, acr As Double) As Variant
     
     Dim size As Integer: size = UBound(bands_array) + 1
     
-    ReDim Preserve graph_coordinates(size)
+    ReDim Preserve bands_array(size)
     
-    Set graph_coordinates(size) = New Class1
+    Set bands_array(size) = New BAND_ARRAY_CLASS
     
-    'Plot point 1
-    With graph_coordinates(size)
+    With bands_array(size)
+        .graph_name = graph_name
         .wall_loss = wall_loss
         .date_value = date_value
         .acr = acr
     End With
 
-    push_to_bands_array = bands_array
+    push_to_array = bands_array
     
 End Function
 
-Function clear_graph_data()
-
-
-
-End Function
-
-Function output_graph_data()
+'Description: Outputs all data from the passed array to a specific location on a worksheet then sorts
+Function output_graph_data(sht As Worksheet, clear_range As Range, insert_cell As Range, output_array As Variant)
     
-    Dim wkbk As Workbook: Set wkbk = ThisWorkbook
-    Dim sht As Worksheet: Set sht = wkbk.Worksheets("Wall_Loss_Bands")
+    Dim x As Integer:   x = insert_cell.Row
+    Dim y As Integer:   y = insert_cell.Column
+    Dim i As Integer
     
-    Dim x As Integer
-    Dim y As Integer
+    'Remove all existing data from sheet
+    clear_range.Clear
     
-    x = 1 'spreadsheet data insert anchor point for x axis
-    y = 1 'spreadsheet data insert anchor point for y axis
+    'Loop through array and output to location
+    For i = 0 To UBound(output_array) - 1
     
-'Ouput All Data to Sheet
-    'Todays date
-    Worksheets("wall_loss_bands").Cells(x + 14, y).Value = DateValue(Format(Now(), "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 15, y).Value = DateValue(Format(Now(), "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 14, y + 1).Value = 0
-    Worksheets("wall_loss_bands").Cells(x + 15, y + 1).Value = nominal_wall_thickness
+        sht.Cells(x + i, y).Value = output_array(i + 1).graph_name
+        sht.Cells(x + i, y + 1).Value = output_array(i + 1).date_value
+        sht.Cells(x + i, y + 2).Value = output_array(i + 1).wall_loss
+        sht.Cells(x + i, y + 3).Value = output_array(i + 1).acr
     
-    'Remaining Life
-    Worksheets("wall_loss_bands").Cells(x + 19, y).Value = DateValue(Format(graph_coordinates(i - 1).date_value, "Short Date"))
-    Dim RL_Recommended_Acr As Date: RL_Recommended_Acr = DateValue(Format(graph_coordinates(i - 1).date_value, "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 20, y).Value = RL_Recommended_Acr
-    Worksheets("wall_loss_bands").Cells(x + 19, y + 1).Value = 0
-    Worksheets("wall_loss_bands").Cells(x + 20, y + 1).Value = nominal_wall_thickness
+    Next i
     
-    'Recommended ACR
-    Worksheets("wall_loss_bands").Cells(x + 29, y).Value = DateValue(Format(graph_coordinates(i).date_value, "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 30, y).Value = RL_Recommended_Acr
-    Worksheets("wall_loss_bands").Cells(x + 29, y + 1).Value = graph_coordinates(i).wall_loss
-    Worksheets("wall_loss_bands").Cells(x + 29, y + 2).Value = (nominal_wall_thickness - graph_coordinates(i).wall_loss) / (DateDiff("d", graph_coordinates(i).date_value, graph_coordinates(i - 1).date_value) / 365)
-    Worksheets("wall_loss_bands").Cells(x + 30, y + 1).Value = nominal_wall_thickness
-    
-    'Current Remaining Life
-    Worksheets("wall_loss_bands").Cells(x + 34, y).Value = DateAdd("d", sht.Cells(5, 15) * 365, last_inspection_date)
-    Dim RL_Current_Acr As Date: RL_Current_Acr = DateAdd("d", sht.Cells(5, 15) * 365, last_inspection_date)
-    Worksheets("wall_loss_bands").Cells(x + 35, y).Value = RL_Current_Acr
-    Worksheets("wall_loss_bands").Cells(x + 34, y + 1).Value = 0
-    Worksheets("wall_loss_bands").Cells(x + 35, y + 1).Value = nominal_wall_thickness
-    
-    'Current ACR
-    'HOLD ACR VALUE TO BE ADDED
-    Worksheets("wall_loss_bands").Cells(x + 39, y).Value = DateValue(Format(last_inspection_date, "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 40, y).Value = DateAdd("d", sht.Cells(5, 15) * 365, last_inspection_date)
-    Worksheets("wall_loss_bands").Cells(x + 39, y + 1).Value = last_inspection_date_wall_loss
-    Worksheets("wall_loss_bands").Cells(x + 40, y + 1).Value = nominal_wall_thickness
-    
-    'Actual Corrosion Rate
-    
-    'HOLD ACR VALUE TO BE ADDED
-    Worksheets("wall_loss_bands").Cells(x + 44, y).Value = DateValue(Format(last_inspection_date, "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 45, y).Value = DateAdd("d", sht.Cells(8, 15) * 365, last_inspection_date)
-    Worksheets("wall_loss_bands").Cells(x + 44, y + 1).Value = last_inspection_date_wall_loss
-    Worksheets("wall_loss_bands").Cells(x + 45, y + 1).Value = nominal_wall_thickness
-    
-    'Actual Corrosion Rate Remaining Life
-    Worksheets("wall_loss_bands").Cells(x + 49, y).Value = DateAdd("d", sht.Cells(8, 15), last_inspection_date)
-    Worksheets("wall_loss_bands").Cells(x + 50, y).Value = DateAdd("d", sht.Cells(8, 15), last_inspection_date)
-    Worksheets("wall_loss_bands").Cells(x + 49, y + 1).Value = nominal_wall_thickness
-    Worksheets("wall_loss_bands").Cells(x + 50, y + 1).Value = nominal_wall_thickness
-    
-    'Maximum Allowable Wall Loss
-    Worksheets("wall_loss_bands").Cells(x + 54, y).Value = DateValue(Format(last_inspection_date, "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 55, y).Value = IIf(RL_Recommended_Acr > RL_Current_Acr, RL_Recommended_Acr, RL_Current_Acr)
-    Worksheets("wall_loss_bands").Cells(x + 54, y + 1).Value = nominal_wall_thickness - Cells(9, 15).Value
-    Worksheets("wall_loss_bands").Cells(x + 55, y + 1).Value = nominal_wall_thickness - Cells(9, 15).Value
-    
-    'Nominal Wall Thickness
-    Worksheets("wall_loss_bands").Cells(x + 24, y).Value = DateValue(Format(graph_coordinates(1).date_value, "Short Date"))
-    Worksheets("wall_loss_bands").Cells(x + 25, y).Value = IIf(RL_Recommended_Acr > RL_Current_Acr, RL_Recommended_Acr, RL_Current_Acr)
-    Worksheets("wall_loss_bands").Cells(x + 24, y + 1).Value = nominal_wall_thickness
-    Worksheets("wall_loss_bands").Cells(x + 25, y + 1).Value = nominal_wall_thickness
-    
-    'Actual Corrosion Rate Remaining Life
-    'To be created
-    
-    'Plotted Data
-    For n = 1 To i
-        
-        Worksheets("wall_loss_bands").Cells(x + 57, y) = "date_value"
-        Worksheets("wall_loss_bands").Cells(x + 57, y + 1) = "wall_loss"
-        Worksheets("wall_loss_bands").Cells(x + 57, y + 2) = "acr"
-        
-        Worksheets("wall_loss_bands").Cells(x + 57 + n, y) = graph_coordinates(n).date_value
-        Worksheets("wall_loss_bands").Cells(x + 57 + n, y + 1) = graph_coordinates(n).wall_loss
-        Worksheets("wall_loss_bands").Cells(x + 57 + n, y + 2) = graph_coordinates(n).acr
-    
-    Next n
-    
-    'Sort Plotted Data by wall loss
-    Range(Cells(x + 57 + 1, y), Cells(x + 57 + i, y + 2)).Sort key1:=Range(Cells(x + 57 + 1, y + 1), Cells(x + 57 + i, y + 1)), _
+    'Sort data by name then by wall_loss
+    Range(Cells(x, y), Cells(x + UBound(output_array) - 1, y + 3)).Sort _
+        key1:=Range(Cells(x, y), Cells(x + UBound(output_array) - 1, y)), _
+        key2:=Range(Cells(x, y + 2), Cells(x + UBound(output_array) - 1, y + 2)), _
         order1:=xlAscending, Header:=xlNo
 
 End Function
 
-Function configure_graph()
+'Description: Corrects data ranges in chart to correct locations as per the output dataset
+Function configure_graph(sht As Worksheet, x_axis_min As Long, x_axis_max As Long)
 
     With sht.ChartObjects(1).Chart.Axes(xlCategory)
-        .MinimumScale = CDbl(last_inspection_date)
-        .MaximumScale = CDbl(IIf(RL_Recommended_Acr > RL_Current_Acr, RL_Recommended_Acr + 100, RL_Current_Acr + 100))
+        .MinimumScale = CDbl(x_axis_min)
+        .MaximumScale = CDbl(x_axis_max)
     End With
 
 End Function
