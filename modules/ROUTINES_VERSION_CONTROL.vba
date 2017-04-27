@@ -1,9 +1,13 @@
 Attribute VB_Name = "ROUTINES_VERSION_CONTROL"
-'Option Explicit
+'AUTHOR: Joshua William Adams
+'REV HISTORY:
+'REV: A DESC.: Issued for Review                    DATE: 27/04/2017
+'REV: 0 DESC.: Issued for Use                       DATE: 27/04/2017
+'DESCRIPTION: Module version control code.
 
+'DESCRIPTION: This code Exports all VBA modules
 Sub SaveCodeModules()
 
-    'This code Exports all VBA modules
     Dim i%, sName$
     
     With ThisWorkbook.VBProject
@@ -17,6 +21,7 @@ Sub SaveCodeModules()
 
 End Sub
 
+'DESCRIPTION: This code Imports all VBA modules
 Sub ImportCodeModules()
 
     With ThisWorkbook.VBProject
